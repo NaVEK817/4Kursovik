@@ -1,15 +1,83 @@
 # -*- coding: utf-8 -*-
 """
-Главное окно приложения с таблицей вакансий
+Главное окно приложения с таблицей вакансий и контекстным меню
 """
 import json
 from datetime import datetime
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTableWidget, QTableWidgetItem, QHeaderView,
-                             QPushButton, QLabel, QMessageBox, QApplication)
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+                             QPushButton, QLabel, QMessageBox, QMenu,
+                             QDialog, QTextEdit, QVBoxLayout as QVBoxDialog)
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint
+from PyQt5.QtGui import QCursor
 import styles
+
+class VacancyDetailDialog(QDialog):
+    """Диалог с полной информацией о вакансии"""
+    
+    def __init__(self, vacancy, parent=None):
+        super().__init__(parent)
+        self.vacancy = vacancy
+        self.init_ui()
+        
+    def init_ui(self):
+        self.setWindowTitle(f"Детали вакансии: {self.vacancy.get('title', '')}")
+        self.setGeometry(300, 300, 700, 600)
+        self.setStyleSheet(styles.MAIN_STYLE)
+        
+        layout = QVBoxDialog()
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Заголовок
+        title_label = QLabel(self.vacancy.get('title', ''))
+        title_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {styles.S7_GREEN};")
+        title_label.setWordWrap(True)
+        layout.addWidget(title_label)
+        
+        # Основная информация
+        info_text = QTextEdit()
+        info_text.setReadOnly(True)
+        info_text.setStyleSheet(f"background-color: {styles.S7_WHITE};")
+        
+        # Формирование текста без поля source
+        info = f"""
+        <table width="100%" cellpadding="5">
+            <tr><td width="150"><b>ID:</b></td><td>{self.vacancy.get('id', '')}</td></tr>
+            <tr><td><b>Название:</b></td><td>{self.vacancy.get('title', '')}</td></tr>
+            <tr><td><b>Зарплата:</b></td><td>{self.vacancy.get('salary', 'Не указана')}</td></tr>
+            <tr><td><b>Город:</b></td><td>{self.vacancy.get('area', '')}</td></tr>
+            <tr><td><b>Опыт:</b></td><td>{self.vacancy.get('experience', '')}</td></tr>
+            <tr><td><b>График:</b></td><td>{self.vacancy.get('schedule', '')}</td></tr>
+            <tr><td><b>Занятость:</b></td><td>{self.vacancy.get('employment', '')}</td></tr>
+            <tr><td><b>Дата публикации:</b></td><td>{self.vacancy.get('published_at', '')}</td></tr>
+        </table>
+        
+        <h3 style='color: {styles.S7_GREEN}; margin-top: 20px;'>Требования</h3>
+        <p>{self.vacancy.get('requirements', 'Не указаны')}</p>
+        
+        <h3 style='color: {styles.S7_GREEN};'>Обязанности</h3>
+        <p>{self.vacancy.get('responsibilities', 'Не указаны')}</p>
+        
+        <h3 style='color: {styles.S7_GREEN};'>Условия</h3>
+        <p>{self.vacancy.get('conditions', 'Не указаны')}</p>
+        
+        <h3 style='color: {styles.S7_GREEN};'>Ключевые навыки</h3>
+        <p>{self.vacancy.get('skills', 'Не указаны')}</p>
+        
+        <h3 style='color: {styles.S7_GREEN};'>Ссылка</h3>
+        <p><a href="{self.vacancy.get('link', '#')}">{self.vacancy.get('link', '')}</a></p>
+        """
+        
+        info_text.setHtml(info)
+        layout.addWidget(info_text)
+        
+        # Кнопка закрытия
+        close_btn = QPushButton("Закрыть")
+        close_btn.clicked.connect(self.accept)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        layout.addWidget(close_btn, alignment=Qt.AlignCenter)
+        
+        self.setLayout(layout)
 
 class MainWindow(QMainWindow):
     """Главное окно приложения"""
@@ -52,6 +120,12 @@ class MainWindow(QMainWindow):
         self.update_btn.clicked.connect(self.open_update_window)
         nav_layout.addWidget(self.update_btn)
         
+        # Кнопка управления пользователями (только для админа)
+        if self.user_data.get('role') == 'admin':
+            self.users_btn = QPushButton("👥 Управление пользователями")
+            self.users_btn.clicked.connect(self.open_users_window)
+            nav_layout.addWidget(self.users_btn)
+        
         nav_layout.addStretch()
         
         # Информация о пользователе
@@ -72,6 +146,10 @@ class MainWindow(QMainWindow):
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
+        
+        # Включение контекстного меню
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
         
         # Установка колонок (без поля source)
         columns = ["ID", "Название", "Зарплата", "Город", "Опыт", "График", 
@@ -107,7 +185,51 @@ class MainWindow(QMainWindow):
         bottom_layout.addWidget(refresh_btn)
         
         main_layout.addLayout(bottom_layout)
-        
+    
+    def show_context_menu(self, pos: QPoint):
+        """Показать контекстное меню при правом клике"""
+        row = self.table.currentRow()
+        if row >= 0:
+            menu = QMenu()
+            
+            view_action = menu.addAction("👁️ Просмотреть детали")
+            view_action.triggered.connect(self.show_vacancy_details)
+            
+            menu.addSeparator()
+            
+            doc_action = menu.addAction("📄 Создать документ для этой вакансии")
+            doc_action.triggered.connect(self.create_document_for_vacancy)
+            
+            ai_action = menu.addAction("🤖 Анализ кандидатов для этой вакансии")
+            ai_action.triggered.connect(self.analyze_candidates_for_vacancy)
+            
+            # Показываем меню в позиции курсора
+            menu.exec_(QCursor.pos())
+    
+    def show_vacancy_details(self):
+        """Показать детали выбранной вакансии"""
+        row = self.table.currentRow()
+        if row >= 0:
+            vacancy = self.vacancies[row]
+            dialog = VacancyDetailDialog(vacancy, self)
+            dialog.exec_()
+    
+    def create_document_for_vacancy(self):
+        """Создать документ для выбранной вакансии"""
+        row = self.table.currentRow()
+        if row >= 0:
+            from document_window import DocumentWindow
+            self.document_window = DocumentWindow([self.vacancies[row]])
+            self.document_window.show()
+    
+    def analyze_candidates_for_vacancy(self):
+        """Открыть окно анализа кандидатов для выбранной вакансии"""
+        row = self.table.currentRow()
+        if row >= 0:
+            from ai_agent_window import AIAgentWindow
+            self.ai_window = AIAgentWindow(self.vacancies[row])
+            self.ai_window.show()
+    
     def load_vacancies(self):
         """Загрузка вакансий из JSON файла"""
         try:
@@ -174,7 +296,7 @@ class MainWindow(QMainWindow):
     def open_schedule_window(self):
         """Открытие окна расписания собеседований"""
         from schedule_window import ScheduleWindow
-        self.schedule_window = ScheduleWindow()
+        self.schedule_window = ScheduleWindow(self.user_data)
         self.schedule_window.show()
     
     def open_update_window(self):
@@ -182,5 +304,10 @@ class MainWindow(QMainWindow):
         from update_window import UpdateWindow
         self.update_window = UpdateWindow()
         self.update_window.show()
-        # Обновление таблицы после закрытия окна обновления
         self.update_window.update_completed.connect(self.load_vacancies)
+    
+    def open_users_window(self):
+        """Открытие окна управления пользователями"""
+        from users_window import UsersWindow
+        self.users_window = UsersWindow()
+        self.users_window.show()

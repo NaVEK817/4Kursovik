@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Окно расписания собеседований с календарем
+Окно расписания собеседований с календарем и информацией о пользователях
 """
 import json
 import os
@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QCalendarWidget, QTableWidget, QTableWidgetItem,
                              QPushButton, QMessageBox, QGroupBox, QHeaderView,
-                             QComboBox, QTimeEdit, QTextEdit)
+                             QComboBox, QTimeEdit, QTextEdit, QLineEdit)
 from PyQt5.QtCore import Qt, QDate, QTime
 import styles
 
@@ -17,8 +17,9 @@ class ScheduleWindow(QWidget):
     
     SCHEDULE_FILE = "interviews_schedule.json"
     
-    def __init__(self):
+    def __init__(self, user_data):
         super().__init__()
+        self.user_data = user_data
         self.interviews = self.load_interviews()
         self.init_ui()
         self.update_interviews_list()
@@ -68,9 +69,8 @@ class ScheduleWindow(QWidget):
         # Кандидат
         candidate_layout = QHBoxLayout()
         candidate_layout.addWidget(QLabel("Кандидат:"))
-        self.candidate_input = QComboBox()
-        self.candidate_input.setEditable(True)
-        self.candidate_input.addItems(self.get_candidates_from_vacancies())
+        self.candidate_input = QLineEdit()
+        self.candidate_input.setPlaceholderText("Введите ФИО кандидата")
         candidate_layout.addWidget(self.candidate_input)
         add_layout.addLayout(candidate_layout)
         
@@ -112,14 +112,15 @@ class ScheduleWindow(QWidget):
         
         # Таблица собеседований
         self.interviews_table = QTableWidget()
-        self.interviews_table.setColumnCount(4)
-        self.interviews_table.setHorizontalHeaderLabels(["Время", "Кандидат", "Комментарий", "Действия"])
+        self.interviews_table.setColumnCount(5)
+        self.interviews_table.setHorizontalHeaderLabels(["Время", "Кандидат", "Комментарий", "Создатель", "Действия"])
         
         header = self.interviews_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setSectionResizeMode(2, QHeaderView.Stretch)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         
         self.interviews_table.setAlternatingRowColors(True)
         right_panel.addWidget(self.interviews_table)
@@ -173,18 +174,6 @@ class ScheduleWindow(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить расписание: {str(e)}")
     
-    def get_candidates_from_vacancies(self):
-        """Получение списка кандидатов из вакансий (для демо)"""
-        candidates = []
-        try:
-            with open('vacancy_test_file.json', 'r', encoding='utf-8') as f:
-                vacancies = json.load(f)
-                for vacancy in vacancies[:5]:  # Берем первые 5 вакансий для демо
-                    candidates.append(f"Кандидат на {vacancy.get('title', '')[:30]}...")
-        except:
-            candidates = ["Кандидат 1", "Кандидат 2", "Кандидат 3", "Кандидат 4", "Кандидат 5"]
-        return candidates
-    
     def date_selected(self, date):
         """Обработка выбора даты в календаре"""
         date_str = date.toString("yyyy-MM-dd")
@@ -212,23 +201,30 @@ class ScheduleWindow(QWidget):
             comment_item.setToolTip(interview.get('comment', ''))
             self.interviews_table.setItem(row, 2, comment_item)
             
-            # Кнопка удаления
-            delete_btn = QPushButton("✖ Удалить")
-            delete_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {styles.S7_RED};
-                    color: white;
-                    padding: 4px 8px;
-                    font-size: 11px;
-                }}
-                QPushButton:hover {{
-                    background-color: {styles.S7_RED};
-                    opacity: 0.8;
-                }}
-            """)
-            delete_btn.clicked.connect(lambda checked, d=date_str, i=interview: self.delete_interview(d, i))
-            delete_btn.setCursor(Qt.PointingHandCursor)
-            self.interviews_table.setCellWidget(row, 3, delete_btn)
+            # Создатель
+            creator = interview.get('created_by', 'Неизвестно')
+            creator_item = QTableWidgetItem(creator)
+            creator_item.setForeground(Qt.darkGreen if creator == self.user_data.get('username') else Qt.black)
+            self.interviews_table.setItem(row, 3, creator_item)
+            
+            # Кнопка удаления (только для своего создателя или админа)
+            if creator == self.user_data.get('username') or self.user_data.get('role') == 'admin':
+                delete_btn = QPushButton("✖ Удалить")
+                delete_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {styles.S7_RED};
+                        color: white;
+                        padding: 4px 8px;
+                        font-size: 11px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {styles.S7_RED};
+                        opacity: 0.8;
+                    }}
+                """)
+                delete_btn.clicked.connect(lambda checked, d=date_str, i=interview: self.delete_interview(d, i))
+                delete_btn.setCursor(Qt.PointingHandCursor)
+                self.interviews_table.setCellWidget(row, 4, delete_btn)
     
     def update_interviews_list(self):
         """Обновление всего списка (вызывается после изменений)"""
@@ -239,10 +235,13 @@ class ScheduleWindow(QWidget):
         total_interviews = sum(len(v) for v in self.interviews.values())
         today = QDate.currentDate().toString("yyyy-MM-dd")
         today_count = len(self.interviews.get(today, []))
+        user_interviews = sum(1 for interviews in self.interviews.values() 
+                              for i in interviews if i.get('created_by') == self.user_data.get('username'))
         
         self.stats_label.setText(
             f"Всего собеседований: {total_interviews}\n"
             f"На сегодня: {today_count}\n"
+            f"Ваших собеседований: {user_interviews}\n"
             f"Всего дней с собеседованиями: {len(self.interviews)}"
         )
     
@@ -251,7 +250,7 @@ class ScheduleWindow(QWidget):
         date = self.calendar.selectedDate()
         date_str = date.toString("yyyy-MM-dd")
         
-        candidate = self.candidate_input.currentText().strip()
+        candidate = self.candidate_input.text().strip()
         if not candidate:
             QMessageBox.warning(self, "Предупреждение", "Введите имя кандидата")
             return
@@ -267,11 +266,13 @@ class ScheduleWindow(QWidget):
                                    f"Время {time_str} уже занято другим собеседованием")
                 return
         
-        # Добавление собеседования
+        # Добавление собеседования с информацией о создателе
         new_interview = {
             'candidate': candidate,
             'time': time_str,
-            'comment': comment
+            'comment': comment,
+            'created_by': self.user_data.get('username', 'Неизвестно'),
+            'created_at': datetime.now().isoformat()
         }
         
         if date_str not in self.interviews:
@@ -281,7 +282,7 @@ class ScheduleWindow(QWidget):
         self.save_interviews()
         
         # Очистка формы
-        self.candidate_input.setCurrentIndex(-1)
+        self.candidate_input.clear()
         self.comment_input.clear()
         
         # Обновление отображения
