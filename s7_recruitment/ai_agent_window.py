@@ -6,6 +6,7 @@ import json
 import re
 import random
 from datetime import datetime
+from ai_analyzer import OllamaCandidateAnalyzer
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QTextEdit, QGroupBox, QTableWidget,
                              QTableWidgetItem, QHeaderView, QMessageBox,
@@ -113,6 +114,85 @@ class CandidateDetailDialog(QDialog):
         self.setLayout(layout)
 
 class CandidateAnalyzer(QThread):
+    """Поток для анализа кандидатов с использованием AI (Ollama)"""
+
+    progress_signal = pyqtSignal(int)
+    result_signal = pyqtSignal(list)
+    finished_signal = pyqtSignal()
+
+    def __init__(self, vacancy, candidates_data):
+        super().__init__()
+        self.vacancy = vacancy
+        self.candidates_data = candidates_data
+        # Инициализируем AI-анализатор
+        self.ai_analyzer = OllamaCandidateAnalyzer() # Можно передать имя модели, если нужно
+
+    def run(self):
+        """Запуск AI-анализа в отдельном потоке"""
+        results = []
+        total = len(self.candidates_data)
+
+        for i, candidate in enumerate(self.candidates_data):
+            # Вызываем AI-анализ для каждого кандидата
+            ai_result = self.ai_analyzer.analyze(self.vacancy, candidate)
+
+            # Формируем результат в старом формате для совместимости
+            result_item = {
+                'candidate': candidate,
+                'score': ai_result.get('score', 0),
+                'details': self._format_details_for_display(ai_result, candidate)
+            }
+            results.append(result_item)
+
+            # Обновляем прогресс
+            self.progress_signal.emit(int((i + 1) / total * 100))
+
+        # Сортировка по убыванию рейтинга (AI уже дает score)
+        results.sort(key=lambda x: x['score'], reverse=True)
+        self.result_signal.emit(results)
+        self.finished_signal.emit()
+
+    def _format_details_for_display(self, ai_result: dict, candidate: dict) -> str:
+        """
+        Преобразует структурированный ответ от AI в красивый текст для отображения.
+        """
+        details = ai_result.get('details', {})
+        summary = ai_result.get('summary', 'Нет краткого описания.')
+
+        lines = []
+        lines.append(f"📊 Итоговая оценка: {ai_result.get('score', 0)}%\n")
+        lines.append(f"📝 Резюме: {summary}\n")
+        lines.append("--- Детальный анализ ---")
+        lines.append(f"🔹 Опыт: {details.get('experience_match', 'Не указано')}")
+        lines.append(f"🔹 Навыки: {details.get('skills_match', 'Не указано')}")
+        lines.append(f"🔹 Локация: {details.get('location_match', 'Не указано')}")
+        lines.append(f"🔹 Зарплата: {details.get('salary_match', 'Не указано')}")
+        lines.append(f"🔹 График/Занятость: {details.get('schedule_employment_match', 'Не указано')}")
+
+        strengths = details.get('strengths', [])
+        if strengths:
+            lines.append("✅ Сильные стороны:")
+            for s in strengths:
+                lines.append(f"  - {s}")
+
+        weaknesses = details.get('weaknesses', [])
+        if weaknesses:
+            lines.append("⚠️ Слабые стороны/Риски:")
+            for w in weaknesses:
+                lines.append(f"  - {w}")
+
+        lines.append(f"🎯 Рекомендация: {details.get('recommendation', 'Не указано')}")
+
+        # Добавим контактную информацию из кандидата, как было в старой версии
+        lines.append("\n--- Контактная информация ---")
+        if candidate.get('phone'):
+            lines.append(f"📞 Телефон: {candidate.get('phone')}")
+        if candidate.get('email'):
+            lines.append(f"✉️ Email: {candidate.get('email')}")
+
+        return '\n'.join(lines)
+
+    # Старые методы extract_keywords, analyze_candidate, generate_details можно удалить
     """Поток для анализа кандидатов"""
     
     progress_signal = pyqtSignal(int)
