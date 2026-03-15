@@ -3,45 +3,47 @@
 Окно AI-агента для анализа кандидатов с реальными данными из resume_file.json
 """
 import json
-import re
 from datetime import datetime
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QTextEdit, QGroupBox, QTableWidget,
                              QTableWidgetItem, QHeaderView, QMessageBox,
                              QComboBox, QSpinBox, QProgressBar, QDialog,
-                             QFormLayout, QDialogButtonBox, QSplitter)
+                             QFormLayout, QVBoxLayout as QVBoxDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont, QColor
+from PyQt5.QtGui import QFont, QColor, QBrush
 import styles
-from ai_analyzer import OllamaCandidateAnalyzer  # Импортируем наш новый AI-анализатор
+from ai_analyzer import OllamaCandidateAnalyzer
+
 
 class CandidateDetailDialog(QDialog):
     """Диалог с детальной информацией о кандидате"""
     
-    def __init__(self, candidate_data, analysis_details, parent=None):
+    def __init__(self, candidate_data, analysis_details, rank_info, parent=None):
         super().__init__(parent)
         self.candidate = candidate_data['candidate']
         self.score = candidate_data['score']
-        self.details = analysis_details
+        self.rank = rank_info['rank']
+        self.total = rank_info['total']
+        self.analysis_details = analysis_details
+        self.ai_result = candidate_data.get('ai_result', {})
         self.init_ui()
         
     def init_ui(self):
         self.setWindowTitle(f"Детальная информация о кандидате")
-        self.setGeometry(300, 300, 700, 600)
+        self.setGeometry(300, 300, 800, 700)
         self.setStyleSheet(styles.MAIN_STYLE)
         
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
         
-        # Заголовок с рейтингом
+        # Заголовок с рейтингом и местом
         title_layout = QHBoxLayout()
         
         # Формируем полное имя кандидата
-        if 'first_name' in self.candidate and 'last_name' in self.candidate:
-            full_name = f"{self.candidate.get('last_name', '')} {self.candidate.get('first_name', '')} {self.candidate.get('middle_name', '')}".strip()
-        else:
-            full_name = self.candidate.get('name', 'Неизвестно')
+        full_name = f"{self.candidate.get('last_name', '')} {self.candidate.get('first_name', '')} {self.candidate.get('middle_name', '')}".strip()
+        if not full_name:
+            full_name = "Кандидат"
         
         name_label = QLabel(f"👤 {full_name}")
         name_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {styles.S7_GREEN};")
@@ -49,7 +51,21 @@ class CandidateDetailDialog(QDialog):
         
         title_layout.addStretch()
         
-        score_label = QLabel(f"Рейтинг: {self.score}%")
+        # Место в рейтинге
+        rank_label = QLabel(f"#{self.rank} из {self.total}")
+        rank_label.setStyleSheet(f"""
+            font-size: 14px;
+            font-weight: bold;
+            color: {styles.S7_DARK_GREEN};
+            background-color: {styles.S7_LIGHT_GRAY};
+            padding: 5px 10px;
+            border-radius: 10px;
+            margin-right: 10px;
+        """)
+        title_layout.addWidget(rank_label)
+        
+        # Основной рейтинг
+        score_label = QLabel(f"{self.score}%")
         score_label.setStyleSheet(f"""
             font-size: 16px; 
             font-weight: bold; 
@@ -69,10 +85,10 @@ class CandidateDetailDialog(QDialog):
         layout.addWidget(job_title)
         
         # Основная информация
-        info_group = QGroupBox("Контактная информация")
+        info_group = QGroupBox("Основная информация")
         info_layout = QFormLayout()
         
-        # Возраст (если есть дата рождения)
+        # Возраст
         birth_date = self.candidate.get('birth_date', '')
         if birth_date:
             try:
@@ -84,16 +100,14 @@ class CandidateDetailDialog(QDialog):
                 info_layout.addRow("🎂 Дата рождения:", QLabel(birth_date))
         
         # Город
-        city = self.candidate.get('area', self.candidate.get('city', 'Не указан'))
+        city = self.candidate.get('area', 'Не указан')
         info_layout.addRow("🏙️ Город:", QLabel(city))
         
-        # Телефон (если есть)
-        phone = self.candidate.get('phone', 'Не указан')
-        info_layout.addRow("📞 Телефон:", QLabel(phone))
-        
-        # Email (если есть)
-        email = self.candidate.get('email', 'Не указан')
-        info_layout.addRow("✉️ Email:", QLabel(email))
+        # Пол
+        gender = self.candidate.get('gender', '')
+        if gender:
+            gender_text = "Мужской" if gender == 'male' else "Женский" if gender == 'female' else gender
+            info_layout.addRow("⚥ Пол:", QLabel(gender_text))
         
         info_group.setLayout(info_layout)
         layout.addWidget(info_group)
@@ -104,9 +118,9 @@ class CandidateDetailDialog(QDialog):
         
         education = self.candidate.get('education', {})
         if isinstance(education, dict):
-            edu_text = f"{education.get('level', 'Не указано')}"
+            edu_text = f"Уровень: {education.get('level', 'Не указано')}"
             if education.get('institution'):
-                edu_text += f" - {education.get('institution')}"
+                edu_text += f"\nУчебное заведение: {education.get('institution')}"
             if education.get('specialization'):
                 edu_text += f"\nСпециализация: {education.get('specialization')}"
             if education.get('year'):
@@ -129,11 +143,28 @@ class CandidateDetailDialog(QDialog):
         if isinstance(experience, list) and experience:
             for exp in experience:
                 if isinstance(exp, dict):
+                    # Расчет продолжительности
+                    start = exp.get('start', '')
+                    end = exp.get('end', 'н.в.')
+                    duration = ""
+                    if start and len(start) >= 4:
+                        start_year = int(start[:4])
+                        if end and end != 'null' and end != 'н.в.':
+                            if len(end) >= 4:
+                                end_year = int(end[:4])
+                            else:
+                                end_year = 2026
+                        else:
+                            end_year = 2026
+                        years = end_year - start_year
+                        if years > 0:
+                            duration = f" ({years} лет)"
+                    
                     exp_text = f"🏢 {exp.get('company', 'Компания не указана')}"
                     if exp.get('position'):
-                        exp_text += f"\n   Должность: {exp.get('position')}"
-                    if exp.get('start') or exp.get('end'):
-                        exp_text += f"\n   Период: {exp.get('start', '')} - {exp.get('end', 'н.в.')}"
+                        exp_text += f"\n   Должность: {exp.get('position')}{duration}"
+                    if start or end:
+                        exp_text += f"\n   Период: {start} - {end}"
                     if exp.get('description'):
                         exp_text += f"\n   {exp.get('description')}"
                     
@@ -141,10 +172,6 @@ class CandidateDetailDialog(QDialog):
                     exp_label.setWordWrap(True)
                     exp_label.setStyleSheet("margin-bottom: 10px;")
                     exp_layout.addWidget(exp_label)
-        elif isinstance(experience, str):
-            exp_label = QLabel(experience)
-            exp_label.setWordWrap(True)
-            exp_layout.addWidget(exp_label)
         else:
             exp_layout.addWidget(QLabel("Опыт работы не указан"))
         
@@ -168,14 +195,45 @@ class CandidateDetailDialog(QDialog):
         skills_group.setLayout(skills_layout)
         layout.addWidget(skills_group)
         
-        # Детали анализа
-        analysis_group = QGroupBox("Детали анализа")
+        # Зарплатные ожидания
+        salary_group = QGroupBox("Зарплатные ожидания")
+        salary_layout = QFormLayout()
+        
+        salary = self.candidate.get('salary', 'Не указаны')
+        salary_layout.addRow("💰 Ожидаемая зарплата:", QLabel(str(salary)))
+        
+        schedule = self.candidate.get('schedule', 'Не указан')
+        salary_layout.addRow("⏰ Желаемый график:", QLabel(schedule))
+        
+        employment = self.candidate.get('employment', 'Не указана')
+        salary_layout.addRow("📊 Желаемая занятость:", QLabel(employment))
+        
+        salary_group.setLayout(salary_layout)
+        layout.addWidget(salary_group)
+        
+        # AI Анализ
+        analysis_group = QGroupBox("AI Анализ соответствия вакансии")
         analysis_layout = QVBoxLayout()
         
+        # Краткое резюме
+        summary = self.ai_result.get('summary', '')
+        if summary:
+            summary_label = QLabel(f"📝 {summary}")
+            summary_label.setWordWrap(True)
+            summary_label.setStyleSheet(f"""
+                background-color: {styles.S7_LIGHT_GREEN};
+                color: {styles.S7_BLACK};
+                padding: 10px;
+                border-radius: 5px;
+                font-weight: bold;
+            """)
+            analysis_layout.addWidget(summary_label)
+        
+        # Детальный анализ
         analysis_text = QTextEdit()
         analysis_text.setReadOnly(True)
-        analysis_text.setMinimumHeight(200)
-        analysis_text.setText(self.details)
+        analysis_text.setMinimumHeight(300)
+        analysis_text.setText(self.analysis_details)
         analysis_layout.addWidget(analysis_text)
         
         analysis_group.setLayout(analysis_layout)
@@ -201,7 +259,6 @@ class CandidateAnalyzer(QThread):
         super().__init__()
         self.vacancy = vacancy
         self.candidates_data = candidates_data
-        # Инициализируем AI-анализатор
         self.ai_analyzer = OllamaCandidateAnalyzer()
 
     def run(self):
@@ -214,19 +271,28 @@ class CandidateAnalyzer(QThread):
                 # Вызываем AI-анализ для каждого кандидата
                 ai_result = self.ai_analyzer.analyze(self.vacancy, candidate)
 
-                # Формируем результат в старом формате для совместимости
+                # Используем weighted_score если есть, иначе обычный score
+                score = ai_result.get('weighted_score', ai_result.get('score', 30))
+                # Убеждаемся, что score не меньше 30
+                score = max(30, score)
+                
                 result_item = {
                     'candidate': candidate,
-                    'score': ai_result.get('score', 0),
+                    'score': score,
+                    'ai_result': ai_result,
                     'details': self._format_details_for_display(ai_result, candidate)
                 }
                 results.append(result_item)
+                
+                print(f"Анализ кандидата {i+1}/{total} завершен. Оценка: {score}%")
+                
             except Exception as e:
-                # В случае ошибки добавляем кандидата с низким рейтингом
+                print(f"Ошибка при анализе кандидата {i+1}: {str(e)}")
                 result_item = {
                     'candidate': candidate,
-                    'score': 0,
-                    'details': f"Ошибка анализа: {str(e)}"
+                    'score': 30,  # Минимальный рейтинг при ошибке
+                    'ai_result': {},
+                    'details': f"Ошибка анализа: {str(e)}\n\nПрисвоен минимальный рейтинг 30%."
                 }
                 results.append(result_item)
 
@@ -239,38 +305,140 @@ class CandidateAnalyzer(QThread):
         self.finished_signal.emit()
 
     def _format_details_for_display(self, ai_result: dict, candidate: dict) -> str:
-        """
-        Преобразует структурированный ответ от AI в красивый текст для отображения.
-        """
-        details = ai_result.get('details', {})
-        summary = ai_result.get('summary', 'Нет краткого описания.')
-
+        """Преобразует структурированный ответ от AI в красивый текст для отображения."""
+        
         lines = []
-        lines.append(f"📊 ИТОГОВАЯ ОЦЕНКА: {ai_result.get('score', 0)}%\n")
-        lines.append(f"📝 КРАТКОЕ РЕЗЮМЕ: {summary}\n")
-        lines.append("=" * 50)
-        lines.append("ДЕТАЛЬНЫЙ АНАЛИЗ:")
-        lines.append("=" * 50)
-        lines.append(f"🔹 ОПЫТ: {details.get('experience_match', 'Не указано')}")
-        lines.append(f"🔹 НАВЫКИ: {details.get('skills_match', 'Не указано')}")
-        lines.append(f"🔹 ЛОКАЦИЯ: {details.get('location_match', 'Не указано')}")
-        lines.append(f"🔹 ЗАРПЛАТА: {details.get('salary_match', 'Не указано')}")
-        lines.append(f"🔹 ГРАФИК/ЗАНЯТОСТЬ: {details.get('schedule_employment_match', 'Не указано')}")
-
+        lines.append("=" * 60)
+        lines.append("🤖 AI АНАЛИЗ СООТВЕТСТВИЯ ВАКАНСИИ")
+        lines.append("=" * 60)
+        lines.append("")
+        
+        # Основные оценки
+        score = ai_result.get('score', 30)
+        weighted_score = ai_result.get('weighted_score', score)
+        lines.append(f"📊 ИТОГОВАЯ ОЦЕНКА: {score}%")
+        lines.append(f"⚖️  ВЗВЕШЕННАЯ ОЦЕНКА: {weighted_score}%")
+        lines.append("")
+        
+        # Краткое резюме
+        summary = ai_result.get('summary', '')
+        if summary:
+            lines.append("📝 КРАТКОЕ РЕЗЮМЕ:")
+            lines.append(f"   {summary}")
+            lines.append("")
+        
+        # Детальные оценки по критериям
+        criterion_scores = ai_result.get('criterion_scores', {})
+        if criterion_scores:
+            lines.append("📊 ОЦЕНКИ ПО КРИТЕРИЯМ:")
+            lines.append("-" * 40)
+            
+            criteria_names = {
+                'experience': 'Опыт работы',
+                'skills': 'Навыки',
+                'education': 'Образование',
+                'location': 'Локация',
+                'schedule': 'График',
+                'salary': 'Зарплата'
+            }
+            
+            for criterion, display_name in criteria_names.items():
+                if criterion in criterion_scores:
+                    score_data = criterion_scores[criterion]
+                    if isinstance(score_data, dict):
+                        crit_score = score_data.get('score', 30)
+                        comment = score_data.get('comment', '')
+                    else:
+                        crit_score = score_data
+                        comment = ''
+                    
+                    # Визуальная шкала
+                    bar_length = 20
+                    filled = int(crit_score / 100 * bar_length)
+                    bar = '█' * filled + '░' * (bar_length - filled)
+                    
+                    lines.append(f"{display_name:15} [{bar}] {crit_score:3}%")
+                    if comment:
+                        lines.append(f"{' ' * 17}💬 {comment}")
+            lines.append("")
+        
+        # Детальный анализ
+        details = ai_result.get('details', {})
+        
+        if details.get('experience_match'):
+            lines.append("🔹 ОПЫТ РАБОТЫ:")
+            lines.append(f"   {details['experience_match']}")
+            lines.append("")
+        
+        if details.get('skills_match'):
+            lines.append("🔹 НАВЫКИ:")
+            lines.append(f"   {details['skills_match']}")
+            lines.append("")
+        
+        if details.get('education_match'):
+            lines.append("🔹 ОБРАЗОВАНИЕ:")
+            lines.append(f"   {details['education_match']}")
+            lines.append("")
+        
+        if details.get('location_match'):
+            lines.append("🔹 ЛОКАЦИЯ:")
+            lines.append(f"   {details['location_match']}")
+            lines.append("")
+        
+        if details.get('salary_match'):
+            lines.append("🔹 ЗАРПЛАТА:")
+            lines.append(f"   {details['salary_match']}")
+            lines.append("")
+        
+        if details.get('schedule_employment_match'):
+            lines.append("🔹 ГРАФИК И ЗАНЯТОСТЬ:")
+            lines.append(f"   {details['schedule_employment_match']}")
+            lines.append("")
+        
+        # Сильные стороны
         strengths = details.get('strengths', [])
         if strengths:
-            lines.append("\n✅ СИЛЬНЫЕ СТОРОНЫ:")
+            lines.append("✅ СИЛЬНЫЕ СТОРОНЫ:")
             for s in strengths:
-                lines.append(f"  • {s}")
-
+                lines.append(f"   • {s}")
+            lines.append("")
+        
+        # Слабые стороны
         weaknesses = details.get('weaknesses', [])
         if weaknesses:
-            lines.append("\n⚠️ СЛАБЫЕ СТОРОНЫ/РИСКИ:")
+            lines.append("⚠️ СЛАБЫЕ СТОРОНЫ/РИСКИ:")
             for w in weaknesses:
-                lines.append(f"  • {w}")
-
-        lines.append(f"\n🎯 РЕКОМЕНДАЦИЯ: {details.get('recommendation', 'Не указано')}")
-
+                lines.append(f"   • {w}")
+            lines.append("")
+        
+        # Ключевые выводы
+        key_findings = details.get('key_findings', [])
+        if key_findings:
+            lines.append("🔑 КЛЮЧЕВЫЕ ВЫВОДЫ:")
+            for finding in key_findings:
+                lines.append(f"   • {finding}")
+            lines.append("")
+        
+        # Рекомендация
+        recommendation = details.get('recommendation', 'Не указано')
+        recommendation_reason = details.get('recommendation_reason', '')
+        
+        lines.append("🎯 РЕКОМЕНДАЦИЯ:")
+        if recommendation == "Да":
+            lines.append(f"   ✅ {recommendation}")
+        elif recommendation == "Сомнительно":
+            lines.append(f"   ⚠️ {recommendation}")
+        elif recommendation == "Нет":
+            lines.append(f"   ❌ {recommendation}")
+        else:
+            lines.append(f"   {recommendation}")
+        
+        if recommendation_reason:
+            lines.append(f"   💬 {recommendation_reason}")
+        
+        lines.append("")
+        lines.append("=" * 60)
+        
         return '\n'.join(lines)
 
 
@@ -298,12 +466,11 @@ class AIAgentWindow(QWidget):
             current_vacancy_id = self.vacancy.get('id')
             
             for item in resumes_data:
-                # Если в файле есть привязка к вакансии
                 if item.get('vacancy_id') == current_vacancy_id:
                     candidates.extend(item.get('resumes', []))
                     print(f"Найдено {len(item.get('resumes', []))} кандидатов для вакансии {current_vacancy_id}")
             
-            # Если не нашли по ID, добавляем все резюме (для демонстрации)
+            # Если не нашли по ID, показываем все резюме
             if not candidates:
                 for item in resumes_data:
                     candidates.extend(item.get('resumes', []))
@@ -311,85 +478,14 @@ class AIAgentWindow(QWidget):
             
         except FileNotFoundError:
             QMessageBox.warning(self, "Предупреждение", 
-                               f"Файл {self.RESUME_FILE} не найден. Будут использованы демо-данные.")
-            # Если файл не найден, используем минимальные демо-данные
-            candidates = self.generate_fallback_candidates()
+                               f"Файл {self.RESUME_FILE} не найден.")
         except json.JSONDecodeError:
             QMessageBox.warning(self, "Предупреждение", 
-                               "Ошибка при чтении файла с резюме. Будут использованы демо-данные.")
-            candidates = self.generate_fallback_candidates()
+                               "Ошибка при чтении файла с резюме.")
         except Exception as e:
             QMessageBox.warning(self, "Предупреждение", 
-                               f"Ошибка загрузки кандидатов: {str(e)}. Будут использованы демо-данные.")
-            candidates = self.generate_fallback_candidates()
+                               f"Ошибка загрузки кандидатов: {str(e)}")
         
-        return candidates
-    
-    def generate_fallback_candidates(self):
-        """Запасной метод для генерации минимальных демо-данных (на случай отсутствия файла)"""
-        candidates = []
-        
-        # Несколько примеров для демонстрации
-        fallback_data = [
-            {
-                "title": "Специалист по работе с клиентами",
-                "first_name": "Анна",
-                "last_name": "Иванова",
-                "middle_name": "Петровна",
-                "gender": "female",
-                "birth_date": "1995-05-15",
-                "area": "Москва",
-                "experience": [
-                    {
-                        "company": "Аэрофлот",
-                        "position": "Агент по регистрации",
-                        "start": "2020-01",
-                        "end": "2023-12",
-                        "description": "Регистрация пассажиров, работа с багажом, решение конфликтных ситуаций."
-                    }
-                ],
-                "education": {
-                    "level": "Высшее",
-                    "institution": "МГУ",
-                    "specialization": "Менеджмент",
-                    "year": 2017
-                },
-                "skills": ["Английский язык", "Коммуникабельность", "Работа с возражениями", "MS Office"],
-                "salary": "80000",
-                "schedule": "Сменный график",
-                "employment": "Полная занятость"
-            },
-            {
-                "title": "Инженер-программист",
-                "first_name": "Дмитрий",
-                "last_name": "Смирнов",
-                "middle_name": "Алексеевич",
-                "gender": "male",
-                "birth_date": "1990-10-20",
-                "area": "Санкт-Петербург",
-                "experience": [
-                    {
-                        "company": "IT-Company",
-                        "position": "Python разработчик",
-                        "start": "2018-03",
-                        "end": "2024-01",
-                        "description": "Разработка backend на Python, работа с базами данных."
-                    }
-                ],
-                "education": {
-                    "level": "Высшее",
-                    "institution": "СПбГУ",
-                    "specialization": "Прикладная математика",
-                    "year": 2013
-                },
-                "skills": ["Python", "SQL", "Django", "FastAPI", "PostgreSQL"],
-                "salary": "150000",
-                "schedule": "Полный день",
-                "employment": "Полная занятость"
-            }
-        ]
-        
-        candidates.extend(fallback_data)
         return candidates
     
     def init_ui(self):
@@ -398,7 +494,6 @@ class AIAgentWindow(QWidget):
         self.setGeometry(200, 200, 1200, 800)
         self.setStyleSheet(styles.MAIN_STYLE)
         
-        # Основной layout
         layout = QVBoxLayout()
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -424,6 +519,9 @@ class AIAgentWindow(QWidget):
             vacancy_salary = QLabel(f"💰 {self.vacancy.get('salary')}")
             vacancy_layout.addWidget(vacancy_salary)
         
+        vacancy_exp = QLabel(f"💼 Требуемый опыт: {self.vacancy.get('experience', 'Не указан')}")
+        vacancy_layout.addWidget(vacancy_exp)
+        
         vacancy_group.setLayout(vacancy_layout)
         layout.addWidget(vacancy_group)
         
@@ -433,8 +531,8 @@ class AIAgentWindow(QWidget):
         
         params_layout.addWidget(QLabel("Минимальный рейтинг:"))
         self.min_score = QSpinBox()
-        self.min_score.setRange(0, 100)
-        self.min_score.setValue(60)
+        self.min_score.setRange(30, 100)  # Минимум теперь 30
+        self.min_score.setValue(50)
         self.min_score.setSuffix("%")
         params_layout.addWidget(self.min_score)
         
@@ -464,16 +562,19 @@ class AIAgentWindow(QWidget):
         results_layout = QVBoxLayout()
         
         self.results_table = QTableWidget()
-        self.results_table.setColumnCount(5)
-        self.results_table.setHorizontalHeaderLabels(["Рейтинг", "ФИО", "Желаемая должность", "Город", "Действия"])
+        self.results_table.setColumnCount(6)  # Добавили колонку для места
+        self.results_table.setHorizontalHeaderLabels([
+            "Место", "Рейтинг", "ФИО", "Желаемая должность", "Город", "Опыт (лет)"
+        ])
         
         # Настройка колонок
         header = self.results_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Рейтинг
-        header.setSectionResizeMode(1, QHeaderView.Stretch)           # ФИО
-        header.setSectionResizeMode(2, QHeaderView.Stretch)           # Должность
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Город
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Действия
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Место
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Рейтинг
+        header.setSectionResizeMode(2, QHeaderView.Stretch)           # ФИО
+        header.setSectionResizeMode(3, QHeaderView.Stretch)           # Должность
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Город
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Опыт
         
         self.results_table.setAlternatingRowColors(True)
         self.results_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -483,25 +584,22 @@ class AIAgentWindow(QWidget):
         results_group.setLayout(results_layout)
         layout.addWidget(results_group)
         
-        # Рекомендация
-        self.recommendation_label = QLabel()
-        self.recommendation_label.setWordWrap(True)
-        self.recommendation_label.setStyleSheet(f"""
-            background-color: {styles.S7_GREEN};
-            color: white;
-            padding: 15px;
-            border-radius: 8px;
-            font-weight: bold;
-            font-size: 14px;
-        """)
-        layout.addWidget(self.recommendation_label)
+        # Статистика
+        stats_group = QGroupBox("Статистика по кандидатам")
+        stats_layout = QHBoxLayout()
+        
+        self.total_label = QLabel(f"Всего кандидатов: {len(self.candidates)}")
+        stats_layout.addWidget(self.total_label)
+        
+        stats_layout.addStretch()
+        
+        self.analyzed_label = QLabel("Ожидание анализа...")
+        stats_layout.addWidget(self.analyzed_label)
+        
+        stats_group.setLayout(stats_layout)
+        layout.addWidget(stats_group)
         
         self.setLayout(layout)
-        
-        # Показываем количество загруженных кандидатов
-        if self.candidates:
-            QMessageBox.information(self, "Информация", 
-                                   f"Загружено кандидатов для анализа: {len(self.candidates)}")
     
     def start_analysis(self):
         """Запуск анализа кандидатов"""
@@ -509,26 +607,22 @@ class AIAgentWindow(QWidget):
             QMessageBox.warning(self, "Предупреждение", "Нет данных о кандидатах")
             return
         
-        # Проверяем доступность Ollama перед запуском
+        # Проверяем доступность Ollama
         try:
             import requests
             response = requests.get("http://localhost:11434/api/tags", timeout=3)
             if response.status_code != 200:
                 QMessageBox.warning(self, "Предупреждение", 
-                                   "Ollama не отвечает. Убедитесь, что она запущена.\n"
-                                   "Запустите 'ollama serve' в терминале.")
-                return
+                                   "Ollama не отвечает. Будет использован базовый анализ.")
         except:
             QMessageBox.warning(self, "Предупреждение", 
-                               "Не удалось подключиться к Ollama. Убедитесь, что она запущена.\n"
-                               "Запустите 'ollama serve' в терминале.")
-            return
+                               "Не удалось подключиться к Ollama. Будет использован базовый анализ.")
         
         self.analyze_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         self.results_table.setRowCount(0)
-        self.recommendation_label.clear()
+        self.analyzed_label.setText("Анализ в процессе...")
         
         # Запуск анализа в отдельном потоке
         self.analyzer = CandidateAnalyzer(self.vacancy, self.candidates)
@@ -555,81 +649,86 @@ class AIAgentWindow(QWidget):
             candidate = result['candidate']
             
             # Формируем ФИО
-            if 'first_name' in candidate and 'last_name' in candidate:
-                full_name = f"{candidate.get('last_name', '')} {candidate.get('first_name', '')} {candidate.get('middle_name', '')}".strip()
-            else:
-                full_name = candidate.get('name', 'Неизвестно')
+            full_name = f"{candidate.get('last_name', '')} {candidate.get('first_name', '')} {candidate.get('middle_name', '')}".strip()
+            if not full_name:
+                full_name = "Кандидат"
+            
+            # Место в рейтинге
+            rank_item = QTableWidgetItem(f"#{row + 1}")
+            rank_item.setTextAlignment(Qt.AlignCenter)
+            rank_item.setForeground(QBrush(QColor(styles.S7_DARK_GREEN)))
+            rank_item.setFont(QFont("Segoe UI", 10, QFont.Bold))
+            self.results_table.setItem(row, 0, rank_item)
             
             # Рейтинг
             score = result['score']
             score_item = QTableWidgetItem(f"{score}%")
             
-            # Цветовая индикация рейтинга
+            # Цветовая индикация
             if score >= 80:
                 score_item.setForeground(QColor(styles.S7_GREEN))
             elif score >= 60:
                 score_item.setForeground(QColor(styles.S7_LIGHT_GREEN))
             elif score >= 40:
-                score_item.setForeground(QColor("#FFA500"))  # Оранжевый
+                score_item.setForeground(QColor("#FFA500"))
             else:
                 score_item.setForeground(QColor(styles.S7_RED))
             
             score_item.setTextAlignment(Qt.AlignCenter)
-            self.results_table.setItem(row, 0, score_item)
+            score_item.setFont(QFont("Segoe UI", 10, QFont.Bold))
+            self.results_table.setItem(row, 1, score_item)
             
             # ФИО
             name_item = QTableWidgetItem(full_name)
             name_item.setToolTip(full_name)
-            self.results_table.setItem(row, 1, name_item)
+            self.results_table.setItem(row, 2, name_item)
             
             # Желаемая должность
             desired_title = candidate.get('title', 'Не указана')
             title_item = QTableWidgetItem(desired_title)
             title_item.setToolTip(desired_title)
-            self.results_table.setItem(row, 2, title_item)
+            self.results_table.setItem(row, 3, title_item)
             
             # Город
-            city = candidate.get('area', candidate.get('city', 'Не указан'))
+            city = candidate.get('area', 'Не указан')
             city_item = QTableWidgetItem(city)
-            self.results_table.setItem(row, 3, city_item)
+            self.results_table.setItem(row, 4, city_item)
             
-            # Кнопка деталей
-            details_btn = QPushButton("👁️ Подробнее")
-            details_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {styles.S7_LIGHT_GREEN};
-                    color: white;
-                    padding: 5px 10px;
-                    font-size: 11px;
-                    border-radius: 3px;
-                }}
-                QPushButton:hover {{
-                    background-color: {styles.S7_GREEN};
-                }}
-            """)
-            details_btn.clicked.connect(lambda checked, r=result: self.show_candidate_details_with_data(r))
-            details_btn.setCursor(Qt.PointingHandCursor)
-            self.results_table.setCellWidget(row, 4, details_btn)
+            # Расчет общего опыта
+            total_years = 0
+            experience = candidate.get('experience', [])
+            if isinstance(experience, list):
+                for exp in experience:
+                    if isinstance(exp, dict):
+                        start = exp.get('start', '')
+                        end = exp.get('end', '')
+                        if start and len(start) >= 4:
+                            start_year = int(start[:4])
+                            if end and end != 'null' and end:
+                                if len(end) >= 4:
+                                    end_year = int(end[:4])
+                                else:
+                                    end_year = 2026
+                            else:
+                                end_year = 2026
+                            total_years += end_year - start_year
+            
+            years_item = QTableWidgetItem(f"{total_years} лет")
+            years_item.setTextAlignment(Qt.AlignCenter)
+            self.results_table.setItem(row, 5, years_item)
         
-        # Формирование рекомендации
+        # Обновляем статистику
+        self.analyzed_label.setText(f"Проанализировано: {len(results)} кандидатов")
+        
+        # Показываем топ-кандидата
         if display_results:
             best = display_results[0]
-            candidate = best['candidate']
-            
-            if 'first_name' in candidate and 'last_name' in candidate:
-                best_name = f"{candidate.get('last_name', '')} {candidate.get('first_name', '')} {candidate.get('middle_name', '')}".strip()
-            else:
-                best_name = candidate.get('name', 'Неизвестно')
-            
-            self.recommendation_label.setText(
-                f"🏆 Рекомендованный кандидат (рейтинг {best['score']}%):\n"
-                f"👤 {best_name}\n"
-                f"💼 Желаемая должность: {candidate.get('title', 'Не указана')}\n"
-                f"🏙️ Город: {candidate.get('area', candidate.get('city', 'Не указан'))}\n\n"
-                f"📝 {best.get('details', '').split('\\n')[1] if '\\n' in best.get('details', '') else ''}"
-            )
-        else:
-            self.recommendation_label.setText("😕 Не найдено кандидатов с достаточным рейтингом")
+            best_name = f"{best['candidate'].get('last_name', '')} {best['candidate'].get('first_name', '')}".strip()
+            QMessageBox.information(self, "Топ кандидат", 
+                                   f"🥇 Лучший кандидат:\n\n"
+                                   f"{best_name}\n"
+                                   f"Рейтинг: {best['score']}%\n"
+                                   f"Должность: {best['candidate'].get('title', 'Не указана')}")
     
     def analysis_finished(self):
         """Завершение анализа"""
@@ -641,10 +740,9 @@ class AIAgentWindow(QWidget):
         row = index.row()
         if 0 <= row < len(self.analysis_results):
             result = self.analysis_results[row]
-            dialog = CandidateDetailDialog(result, result['details'], self)
+            rank_info = {
+                'rank': row + 1,
+                'total': len(self.analysis_results)
+            }
+            dialog = CandidateDetailDialog(result, result['details'], rank_info, self)
             dialog.exec_()
-    
-    def show_candidate_details_with_data(self, result):
-        """Показать детали кандидата по кнопке"""
-        dialog = CandidateDetailDialog(result, result['details'], self)
-        dialog.exec_()
