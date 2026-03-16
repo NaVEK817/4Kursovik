@@ -205,7 +205,7 @@ class CandidateAnalyzer(QThread):
         super().__init__()
         self.vacancy = vacancy
         self.candidates_data = candidates_data
-        self.ai_analyzer = OllamaCandidateAnalyzer()
+        self.ai_analyzer = OllamaCandidateAnalyzer(model_name="mistral:7b-instruct-q4_0")
         self.is_running = True
 
     def run(self):
@@ -320,40 +320,31 @@ class AIAgentWindow(QWidget):
     def load_candidates_from_file(self):
         """Загрузка кандидатов из resume_file.json"""
         candidates = []
-        
+    
         try:
             with open(self.RESUME_FILE, 'r', encoding='utf-8') as f:
                 resumes_data = json.load(f)
-            
+        
             # Ищем резюме для текущей вакансии
             current_vacancy_id = self.vacancy.get('id')
-            
+        
             for item in resumes_data:
                 if item.get('vacancy_id') == current_vacancy_id:
                     candidates.extend(item.get('resumes', []))
                     print(f"Найдено {len(item.get('resumes', []))} кандидатов для вакансии {current_vacancy_id}")
-            
+        
             # Если не нашли по ID, показываем первые 5 кандидатов для примера
             if not candidates and resumes_data:
                 # Берем кандидатов из первой вакансии в файле
-                candidates = resumes_data[0].get('resumes', [])[:5]
+                candidates = resumes_data[0].get('resumes', [])[:5]  # ← ОГРАНИЧЕНИЕ ДО 5
                 print(f"Загружено {len(candidates)} кандидатов для примера")
-            
-        except FileNotFoundError:
-            QMessageBox.warning(self, "Предупреждение", 
-                               f"Файл {self.RESUME_FILE} не найден.")
-            candidates = self.generate_fallback_candidates()
-        except json.JSONDecodeError:
-            QMessageBox.warning(self, "Предупреждение", 
-                               "Ошибка при чтении файла с резюме.")
-            candidates = self.generate_fallback_candidates()
-        except Exception as e:
-            QMessageBox.warning(self, "Предупреждение", 
-                               f"Ошибка загрузки кандидатов: {str(e)}")
-            candidates = self.generate_fallback_candidates()
         
-        return candidates
+        except Exception as e:
+            print(f"Ошибка загрузки: {e}")
+            candidates = []
     
+        return candidates
+
     def generate_fallback_candidates(self):
         """Запасной метод для генерации минимальных демо-данных"""
         return [
@@ -508,12 +499,20 @@ class AIAgentWindow(QWidget):
     
     def check_ollama_connection(self):
         """Проверка подключения к Ollama"""
-        try:
-            import requests
-            response = requests.get("http://localhost:11434/api/tags", timeout=2)
-            return response.status_code == 200
-        except:
-            return False
+        ports_to_check = [11434, 11435, 11436]
+    
+        for port in ports_to_check:
+            try:
+                import requests
+                response = requests.get(f"http://localhost:{port}/api/tags", timeout=1)
+                if response.status_code == 200:
+                    print(f"✅ Ollama доступна на порту {port}")
+                    return True
+            except:
+                continue
+    
+        print("❌ Ollama не найдена")
+        return False
     
     def start_analysis(self):
         """Запуск анализа кандидатов"""
@@ -589,30 +588,30 @@ class AIAgentWindow(QWidget):
     def display_results(self, results):
         """Отображение результатов анализа"""
         self.analysis_results = results
-        
+    
         # Фильтрация по минимальному рейтингу
         min_score = self.min_score.value()
         filtered_results = [r for r in results if r['score'] >= min_score]
-        
+    
         # Ограничение количества
         max_results = self.max_results.value()
         display_results = filtered_results[:max_results]
-        
+    
         self.results_table.setRowCount(len(display_results))
-        
+    
         for row, result in enumerate(display_results):
             candidate = result['candidate']
-            
+        
             # Формируем ФИО
             if 'first_name' in candidate and 'last_name' in candidate:
-                full_name = f"{candidate.get('last_name', '')} {candidate.get('first_name', '')} {candidate.get('middle_name', '')}".strip()
+             full_name = f"{candidate.get('last_name', '')} {candidate.get('first_name', '')} {candidate.get('middle_name', '')}".strip()
             else:
                 full_name = candidate.get('name', 'Неизвестно')
-            
+        
             # Рейтинг
             score = result['score']
             score_item = QTableWidgetItem(f"{score}%")
-            
+        
             if score >= 80:
                 score_item.setForeground(QColor(styles.S7_GREEN))
             elif score >= 60:
@@ -621,26 +620,26 @@ class AIAgentWindow(QWidget):
                 score_item.setForeground(QColor("#FFA500"))
             else:
                 score_item.setForeground(QColor(styles.S7_RED))
-            
+        
             score_item.setTextAlignment(Qt.AlignCenter)
             self.results_table.setItem(row, 0, score_item)
-            
+        
             # ФИО
             name_item = QTableWidgetItem(full_name)
             name_item.setToolTip(full_name)
             self.results_table.setItem(row, 1, name_item)
-            
+
             # Желаемая должность
             desired_title = candidate.get('title', 'Не указана')
             title_item = QTableWidgetItem(desired_title)
             title_item.setToolTip(desired_title)
             self.results_table.setItem(row, 2, title_item)
-            
+
             # Город
             city = candidate.get('area', candidate.get('city', 'Не указан'))
             city_item = QTableWidgetItem(city)
             self.results_table.setItem(row, 3, city_item)
-            
+
             # Кнопка деталей
             details_btn = QPushButton("👁️ Подробнее")
             details_btn.setStyleSheet(f"""
@@ -658,30 +657,36 @@ class AIAgentWindow(QWidget):
             details_btn.clicked.connect(lambda checked, r=result: self.show_candidate_details_with_data(r))
             details_btn.setCursor(Qt.PointingHandCursor)
             self.results_table.setCellWidget(row, 4, details_btn)
-        
-        # Формирование рекомендации
+    
+        # Формирование топа кандидатов
         if display_results:
-            best = display_results[0]
-            candidate = best['candidate']
+            top_3 = display_results[:min(3, len(display_results))]
+            top_text = "🏆 ТОП КАНДИДАТОВ:\n\n"
+        
+            for i, result in enumerate(top_3, 1):
+                candidate = result['candidate']
+                if 'first_name' in candidate:
+                    name = f"{candidate.get('last_name', '')} {candidate.get('first_name', '')}"
+                else:
+                    name = candidate.get('name', 'Неизвестно')
             
-            if 'first_name' in candidate and 'last_name' in candidate:
-                best_name = f"{candidate.get('last_name', '')} {candidate.get('first_name', '')} {candidate.get('middle_name', '')}".strip()
-            else:
-                best_name = candidate.get('name', 'Неизвестно')
+            # Добавляем разбалловку если есть
+                criteria = result.get('criteria', {})
+                if criteria:
+                    scores = f" [Опыт:{criteria.get('experience',0)} Навыки:{criteria.get('skills',0)} Локация:{criteria.get('location',0)}]"
+                else:
+                    scores = ""
             
-            # Извлекаем первую строку из деталей для краткого preview
-            details_preview = best.get('details', '').split('\n')[1] if '\n' in best.get('details', '') else ''
-            
-            self.recommendation_label.setText(
-                f"🏆 Рекомендованный кандидат (рейтинг {best['score']}%):\n"
-                f"👤 {best_name}\n"
-                f"💼 Желаемая должность: {candidate.get('title', 'Не указана')}\n"
-                f"🏙️ Город: {candidate.get('area', candidate.get('city', 'Не указан'))}\n\n"
-                f"📝 {details_preview}"
-            )
+                top_text += f"{i}. {name} - {result['score']}%{scores}\n"
+                top_text += f"   💼 {candidate.get('title', 'Не указана')}\n"
+                if result.get('strengths'):
+                    top_text += f"   ✅ {', '.join(result['strengths'][:2])}\n"
+                top_text += "\n"
+        
+            self.recommendation_label.setText(top_text)
         else:
             self.recommendation_label.setText("😕 Не найдено кандидатов с достаточным рейтингом")
-    
+
     def analysis_finished(self):
         """Завершение анализа"""
         self.analyze_btn.setEnabled(True)
