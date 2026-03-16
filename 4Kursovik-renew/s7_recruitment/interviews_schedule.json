@@ -1,0 +1,118 @@
+{
+  "2026-03-13": [
+    {
+      "id": "int_20260312154127993632",
+      "candidate": "Петров",
+      "time": "10:00",
+      "date": "2026-03-13",
+      "comment": "Авто-назначение от ИИ. Стандартное рабочее время",
+      "interviewer": "1",
+      "created_by": "AI Agent",
+      "created_at": "2026-03-12T15:41:27.993748",
+      "status": "scheduled"
+    }
+  ],
+  "2026-03-17": [
+    {
+      "id": "int_20260316092351177826",
+      "candidate": "ццц",
+      "time": "09:23",
+      "date": "2026-03-17",
+      "comment": "",
+      "interviewer": "1",
+      "created_by": "1",
+      "created_at": "2026-03-16T09:23:51.177870",
+      "status": "scheduled"
+    },
+    {
+      "id": "int_20260316092400818157",
+      "candidate": "ццуу",
+      "time": "09:24",
+      "date": "2026-03-17",
+      "comment": "",
+      "interviewer": "1",
+      "created_by": "1",
+      "created_at": "2026-03-16T09:24:00.818196",
+      "status": "scheduled"
+    },
+    {
+      "id": "int_20260316094924158130",
+      "candidate": "ппп",
+      "time": "10:00",
+      "date": "2026-03-17",
+      "comment": "Авто-назначение от ИИ. Стандартное рабочее время",
+      "interviewer": "1",
+      "created_by": "AI Agent",
+      "created_at": "2026-03-16T09:49:24.158191",
+      "status": "scheduled"
+    },
+    {
+      "id": "int_20260316102344458479",
+      "candidate": "уууу",
+      "time": "11:00",
+      "date": "2026-03-17",
+      "comment": "Авто-назначение от ИИ. Стандартное рабочее время",
+      "interviewer": "1",
+      "created_by": "AI Agent",
+      "created_at": "2026-03-16T10:23:44.458535",
+      "status": "scheduled"
+    },
+    {
+      "id": "int_20260316102417886232",
+      "candidate": "уууу",
+      "time": "12:00",
+      "date": "2026-03-17",
+      "comment": "Авто-назначение от ИИ. Стандартное рабочее время",
+      "interviewer": "1",
+      "created_by": "AI Agent",
+      "created_at": "2026-03-16T10:24:17.886308",
+      "status": "scheduled"
+    }
+  ],
+  "2026-03-16": [
+    {
+      "id": "int_20260316094931776195",
+      "candidate": "ппп",
+      "time": "09:49",
+      "date": "2026-03-16",
+      "comment": "",
+      "interviewer": "1",
+      "created_by": "1",
+      "created_at": "2026-03-16T09:49:31.776232",
+      "status": "scheduled"
+    },
+    {
+      "id": "int_20260316094943483823",
+      "candidate": "цц",
+      "time": "09:50",
+      "date": "2026-03-16",
+      "comment": "",
+      "interviewer": "1",
+      "created_by": "1",
+      "created_at": "2026-03-16T09:49:43.483869",
+      "status": "scheduled"
+    },
+    {
+      "id": "int_20260316100314262428",
+      "candidate": "55",
+      "time": "10:01",
+      "date": "2026-03-16",
+      "comment": "",
+      "interviewer": "1",
+      "created_by": "1",
+      "created_at": "2026-03-16T10:03:14.262585",
+      "status": "scheduled"
+    },
+    {
+      "id": "int_20260316100259995832",
+      "candidate": "66666",
+      "time": "10:02",
+      "date": "2026-03-16",
+      "comment": "",
+      "interviewer": "1",
+      "created_by": "1",
+      "created_at": "2026-03-16T10:02:59.995896",
+      "status": "scheduled"
+    }
+  ]
+}
