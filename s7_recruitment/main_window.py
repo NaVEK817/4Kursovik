@@ -39,7 +39,7 @@ class VacancyDetailDialog(QDialog):
         info_text.setReadOnly(True)
         info_text.setStyleSheet(f"background-color: {styles.S7_WHITE};")
         
-        # Формирование текста без поля source
+        # Формирование текста
         info = f"""
         <table width="100%" cellpadding="5">
             <tr><td width="150"><b>ID:</b></td><td>{self.vacancy.get('id', '')}</td></tr>
@@ -79,6 +79,7 @@ class VacancyDetailDialog(QDialog):
         
         self.setLayout(layout)
 
+
 class MainWindow(QMainWindow):
     """Главное окно приложения"""
     
@@ -92,7 +93,7 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         """Инициализация интерфейса"""
         self.setWindowTitle(f"S7 Recruitment - Главная (Пользователь: {self.user_data.get('username', '')})")
-        self.setGeometry(100, 100, 1400, 800)
+        self.showMaximized()  # Окно на весь экран
         self.setStyleSheet(styles.MAIN_STYLE)
         
         # Центральный виджет
@@ -108,10 +109,6 @@ class MainWindow(QMainWindow):
         nav_layout = QHBoxLayout()
         
         # Кнопки навигации
-        self.docs_btn = QPushButton("📄 Оформление документа")
-        self.docs_btn.clicked.connect(self.open_document_window)
-        nav_layout.addWidget(self.docs_btn)
-        
         self.schedule_btn = QPushButton("📅 Расписание собеседований")
         self.schedule_btn.clicked.connect(self.open_schedule_window)
         nav_layout.addWidget(self.schedule_btn)
@@ -151,7 +148,7 @@ class MainWindow(QMainWindow):
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
         
-        # Установка колонок (без поля source)
+        # Установка колонок
         columns = ["ID", "Название", "Зарплата", "Город", "Опыт", "График", 
                    "Занятость", "Дата публикации", "Навыки"]
         self.table.setColumnCount(len(columns))
@@ -197,9 +194,6 @@ class MainWindow(QMainWindow):
             
             menu.addSeparator()
             
-            doc_action = menu.addAction("📄 Создать документ для этой вакансии")
-            doc_action.triggered.connect(self.create_document_for_vacancy)
-            
             ai_action = menu.addAction("🤖 Анализ кандидатов для этой вакансии")
             ai_action.triggered.connect(self.analyze_candidates_for_vacancy)
             
@@ -213,14 +207,6 @@ class MainWindow(QMainWindow):
             vacancy = self.vacancies[row]
             dialog = VacancyDetailDialog(vacancy, self)
             dialog.exec_()
-    
-    def create_document_for_vacancy(self):
-        """Создать документ для выбранной вакансии"""
-        row = self.table.currentRow()
-        if row >= 0:
-            from document_window import DocumentWindow
-            self.document_window = DocumentWindow([self.vacancies[row]])
-            self.document_window.show()
     
     def analyze_candidates_for_vacancy(self):
         """Открыть окно анализа кандидатов для выбранной вакансии"""
@@ -286,12 +272,6 @@ class MainWindow(QMainWindow):
             skills_item = QTableWidgetItem(skills)
             skills_item.setToolTip(skills)
             self.table.setItem(row, 8, skills_item)
-    
-    def open_document_window(self):
-        """Открытие окна оформления документа"""
-        from document_window import DocumentWindow
-        self.document_window = DocumentWindow(self.vacancies)
-        self.document_window.show()
     
     def open_schedule_window(self):
         """Открытие окна расписания собеседований"""
